@@ -87,7 +87,7 @@ useradd -m -G users,wheel,audio,video -s /bin/bash $USERNAME
 echo "$USERNAME:$USERPASS" | chpasswd
 echo '%wheel ALL=(ALL:ALL) ALL' >> /etc/sudoers
 
-emerge x11-base/xorg-server x11-drivers/xf86-video-intel x11-terms/kitty x11-wm/bspwm x11-misc/sxhkd x11-misc/polybar x11-misc/rofi x11-misc/lightdm x11-misc/lightdm-gtk-greeter media-fonts/nerd-fonts feh picom dunst
+emerge x11-base/xorg-server x11-misc/lxappearance x11-drivers/xf86-video-intel x11-terms/kitty x11-wm/bspwm x11-misc/sxhkd x11-misc/polybar x11-misc/rofi x11-misc/lightdm x11-misc/lightdm-slick-greeter media-fonts/nerd-fonts feh picom dunst
 
 rc-update add lightdm default
 
