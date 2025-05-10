@@ -1,96 +1,108 @@
 #!/bin/bash
 set -e
 
-### === CẤU HÌNH === ###
-HOSTNAME="gentoo-e7440"
-USERNAME="user"
-USERPASS="password"
-ROOTPASS="rootpass"
+# ========== Thông tin người dùng ==========
+HOSTNAME="lucifer"
+USERNAME="yllin"
+USERPASS="kalanka"
+ROOTPASS="kalanka"
 
-### === KẾT NỐI MẠNG (Wi-Fi nếu cần) === ###
-echo "[INFO] Kiểm tra kết nối mạng..."
-ping -c 1 gentoo.org || { echo "[ERROR] Không có mạng"; exit 1; }
+# ========== Phân vùng ổ đĩa ==========
+DISK="/dev/sda"
+BOOT="/dev/sda1"
+ROOT="/dev/sda2"
+HOME="/dev/sda3"
 
-### === PHÂN VÙNG Ổ ĐĨA === ###
-echo "[INFO] Phân vùng /dev/sda..."
-sgdisk -Z /dev/sda
-sgdisk -n 1:0:+512M -t 1:ef00 /dev/sda    # EFI
-sgdisk -n 2:0:+30G  -t 2:8300 /dev/sda    # Root
-sgdisk -n 3:0:0     -t 3:8300 /dev/sda    # Home
+echo ">>> Phân vùng đĩa"
+parted -s "$DISK" mklabel gpt
+parted -s "$DISK" mkpart primary fat32 1MiB 513MiB
+parted -s "$DISK" set 1 esp on
+parted -s "$DISK" mkpart primary ext4 513MiB 30.5GiB
+parted -s "$DISK" mkpart primary ext4 30.5GiB 100%
 
-mkfs.vfat -F32 /dev/sda1
-mkfs.ext4 /dev/sda2
-mkfs.ext4 /dev/sda3
+mkfs.vfat -F32 "$BOOT"
+mkfs.ext4 "$ROOT"
+mkfs.ext4 "$HOME"
 
-mount /dev/sda2 /mnt/gentoo
+mount "$ROOT" /mnt/gentoo
 mkdir -p /mnt/gentoo/boot /mnt/gentoo/home
-mount /dev/sda1 /mnt/gentoo/boot
-mount /dev/sda3 /mnt/gentoo/home
+mount "$BOOT" /mnt/gentoo/boot
+mount "$HOME" /mnt/gentoo/home
 
-### === TẢI STAGE3 === ###
+echo ">>> Tải và giải nén stage3"
 cd /mnt/gentoo
-echo "[INFO] Tải stage3..."
-wget -qO stage3.tar.xz https://gentoo.osuosl.org/releases/amd64/autobuilds/$(wget -qO- https://gentoo.osuosl.org/releases/amd64/autobuilds/latest-stage3-amd64.txt | grep stage3 | cut -d/ -f1-2)/stage3-amd64-*.tar.xz
-tar xpvf stage3*.tar.xz --xattrs-include='*.*' --numeric-owner
+wget https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64/stage3-amd64-*.tar.xz
+tar xpvf stage3-*.tar.xz --xattrs-include='*.*' --numeric-owner
 
-### === COPY CẤU HÌNH CHROOT === ###
+# ========== Cấu hình make.conf ==========
+cat > /mnt/gentoo/etc/portage/make.conf <<EOF
+CFLAGS="-march=native -O2 -pipe"
+CXXFLAGS="\${CFLAGS}"
+MAKEOPTS="-j$(nproc)"
+USE="X alsa bluetooth branding dbus elogind gtk icu ipv6 jit mp3 nls opengl pulseaudio readline ssl udev unicode vaapi vim-syntax zlib -systemd"
+VIDEO_CARDS="intel i965"
+INPUT_DEVICES="libinput"
+GRUB_PLATFORMS="efi-64"
+EOF
+
+# ========== Chuẩn bị chroot ==========
 cp --dereference /etc/resolv.conf /mnt/gentoo/etc/
 mount --types proc /proc /mnt/gentoo/proc
 mount --rbind /sys /mnt/gentoo/sys
 mount --make-rslave /mnt/gentoo/sys
 mount --rbind /dev /mnt/gentoo/dev
 mount --make-rslave /mnt/gentoo/dev
+chroot /mnt/gentoo /bin/bash <<'EOT'
 
-### === CHROOT === ###
-cat << EOF | chroot /mnt/gentoo /bin/bash
 source /etc/profile
-export PS1="(gentoo-chroot) # "
-
-echo "[INFO] Cấu hình make.conf"
-sed -i 's/^COMMON_FLAGS.*/COMMON_FLAGS="-march=haswell -O2 -pipe"/' /etc/portage/make.conf
-echo 'MAKEOPTS="-j4"' >> /etc/portage/make.conf
+export PS1="(chroot) \$PS1"
 
 emerge-webrsync
+eselect profile set default/linux/amd64/17.1/desktop
+emerge --verbose --update --deep --newuse @world
 
-echo "[INFO] Chọn profile"
-eselect profile set 1
+echo "$HOSTNAME" > /etc/conf.d/hostname
+echo "127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME.localdomain $HOSTNAME" > /etc/hosts
 
-echo "$HOSTNAME" > /etc/hostname
-echo "127.0.0.1   localhost" > /etc/hosts
-echo "127.0.1.1   $HOSTNAME.localdomain $HOSTNAME" >> /etc/hosts
+echo ">>> Mạng"
+emerge --ask net-misc/dhcpcd
+rc-update add dhcpcd default
 
-echo "Asia/Ho_Chi_Minh" > /etc/timezone
-emerge --config sys-libs/timezone-data
-echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen
-locale-gen
-eselect locale set en_US.utf8
-env-update && source /etc/profile
-
-emerge --ask --verbose sys-kernel/gentoo-sources sys-kernel/genkernel
+echo ">>> Cài kernel"
+emerge --ask sys-kernel/gentoo-sources
+emerge --ask sys-kernel/genkernel
 genkernel all
 
-emerge syslog-ng cronie dhcpcd sudo networkmanager
-rc-update add syslog-ng default
-rc-update add cronie default
-rc-update add dhcpcd default
-rc-update add NetworkManager default
+echo ">>> Cấu hình fstab"
+echo "$BOOT  /boot   vfat    defaults,noatime  0 2
+$ROOT  /       ext4    noatime            0 1
+$HOME  /home   ext4    defaults,noatime   0 2" > /etc/fstab
 
-echo "[INFO] Cài grub UEFI"
-emerge --ask sys-boot/grub:2 efibootmgr dosfstools
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Gentoo
+echo ">>> Cài GRUB"
+emerge --ask sys-boot/grub
+grub-install --target=x86_64-efi --efi-directory=/boot
 grub-mkconfig -o /boot/grub/grub.cfg
 
-echo "[INFO] Đặt mật khẩu root"
+echo ">>> Mật khẩu root"
 echo "root:$ROOTPASS" | chpasswd
 
-useradd -m -G users,wheel,audio,video -s /bin/bash $USERNAME
+echo ">>> User mới"
+useradd -m -G wheel,audio,video,portage -s /bin/bash $USERNAME
 echo "$USERNAME:$USERPASS" | chpasswd
-echo '%wheel ALL=(ALL:ALL) ALL' >> /etc/sudoers
 
-emerge x11-base/xorg-server x11-misc/lxappearance x11-drivers/xf86-video-intel x11-terms/kitty x11-wm/bspwm x11-misc/sxhkd x11-misc/polybar x11-misc/rofi x11-misc/lightdm x11-misc/lightdm-slick-greeter media-fonts/nerd-fonts feh picom dunst
+echo ">>> sudo"
+emerge --ask app-admin/sudo
+echo "%wheel ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
-rc-update add lightdm default
+echo ">>> Cài openrc & enable các dịch vụ"
+emerge --ask sys-apps/openrc
+rc-update add dbus default
 
-EOF
+EOT
 
-echo "[✅] Cài đặt hoàn tất. Gõ 'reboot' để khởi động lại!"
+echo ">>> Hoàn tất. Unmount và khởi động lại"
+umount -l /mnt/gentoo/dev{/shm,/pts,}
+umount -R /mnt/gentoo
+reboot
