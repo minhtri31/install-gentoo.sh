@@ -39,7 +39,7 @@ cat > /mnt/gentoo/etc/portage/make.conf <<EOF
 CFLAGS="-march=native -O2 -pipe"
 CXXFLAGS="\${CFLAGS}"
 MAKEOPTS="-j$(nproc)"
-USE="X alsa bluetooth branding dbus elogind gtk icu ipv6 jit mp3 nls opengl pulseaudio readline ssl udev unicode vaapi vim-syntax zlib -systemd"
+USE="X alsa bluetooth branding dbus elogind gtk icu ipv6 jit mp3 nls opengl pulseaudio readline ssl udev unicode vaapi vim-syntax zlib -systemd networkmanager"
 VIDEO_CARDS="intel i965"
 INPUT_DEVICES="libinput"
 GRUB_PLATFORMS="efi-64"
@@ -66,9 +66,9 @@ echo "127.0.0.1   localhost
 ::1         localhost
 127.0.1.1   $HOSTNAME.localdomain $HOSTNAME" > /etc/hosts
 
-echo ">>> Mạng"
-emerge --ask net-misc/dhcpcd
-rc-update add dhcpcd default
+echo ">>> Cài NetworkManager (hỗ trợ Wi-Fi)"
+emerge --ask net-misc/networkmanager
+rc-update add NetworkManager default
 
 echo ">>> Cài kernel"
 emerge --ask sys-kernel/gentoo-sources
